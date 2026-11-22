@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <title>Blooket Test | Cloudflare</title>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #eaf1ff; background: #0d1421; }
+    header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem clamp(1rem, 4vw, 3rem); border-bottom: 1px solid #29364e; background: #131e30; }
+    h1 { margin: 0; font-size: clamp(1.35rem, 3vw, 1.8rem); letter-spacing: -.03em; }
+    .sub { margin: .25rem 0 0; color: #9aacc9; font-size: .9rem; }
+    .pill { padding: .35rem .7rem; background: #23324a; border: 1px solid #3a4a65; border-radius: 999px; color: #cce1ff; font-size: .82rem; }
+    main { max-width: 1450px; margin: auto; padding: 1.25rem clamp(1rem, 4vw, 3rem) 2rem; }
+    .panel { padding: 1.1rem; border-radius: 14px; border: 1px solid #35445e; background: #172237; }
+    label { display: block; margin-bottom: .55rem; font-weight: 650; }
+    .formline, .controls { display: flex; gap: .6rem; flex-wrap: wrap; }
+    input { flex: 1 1 320px; width: 100%; min-width: 0; padding: .7rem .85rem; background: #0b1423; color: white; border: 1px solid #526581; border-radius: 9px; font: inherit; }
+    button { padding: .68rem 1rem; border: 1px solid #477bea; border-radius: 9px; font: inherit; font-weight: 650; cursor: pointer; color: #fff; background: #2858c7; }
+    button.secondary { border-color: #4c5c77; background: #26344b; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button:focus-visible, input:focus-visible { outline: 3px solid #91b6ff; outline-offset: 2px; }
+    .help { color: #a9b9d2; margin: .65rem 0 0; font-size: .87rem; }
+    a { color: #aaccff; }
+    .controls { align-items: center; margin: .9rem 0; }
+    #notice { margin: .85rem 0; min-height: 1.5rem; color: #bdd0ed; }
+    #notice.warn { color: #ffd19a; }
+    #viewer { border: 1px solid #35445e; border-radius: 12px; overflow: hidden; background: #f7f9ff; }
+    #frame { display: block; width: 100%; height: min(80vh, 900px); min-height: 500px; border: 0; }
+    [hidden] { display: none !important; }
+    footer { margin-top: 1rem; font-size: .85rem; color: #91a4c1; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Blooket Test</h1>
+      <p class="sub">GitHub Pages launcher + fixed-destination Cloudflare Worker</p>
+    </div>
+    <span id="connection" class="pill">Worker not configured</span>
+  </header>
+  <main>
+    <section class="panel" aria-label="Cloudflare setup">
+      <label for="workerUrl">Your deployed Cloudflare Worker URL</label>
+      <div class="formline">
+        <input id="workerUrl" type="url" placeholder="https://your-worker.your-subdomain.workers.dev/" spellcheck="false" autocomplete="url">
+        <button id="save" type="button">Save &amp; Launch</button>
+      </div>
+      <p class="help">Deploy <code>worker.js</code> in your Cloudflare account first. This address is saved only in this browser. Setup instructions are in the <a href="https://github.com/damonrosshutchins-boop/blooket-test#readme" target="_blank" rel="noopener noreferrer">repository README</a>.</p>
+    </section>
+    <div class="controls">
+      <button id="reload" type="button" class="secondary" disabled>Reload</button>
+      <button id="external" type="button" class="secondary" disabled>Open proxy in new tab</button>
+      <button id="reset" type="button" class="secondary">Clear saved URL</button>
+    </div>
+    <p id="notice" role="status" aria-live="polite">Add your Cloudflare Worker URL to launch the site.</p>
+    <div id="viewer" hidden>
+      <iframe id="frame" title="Blooket through Cloudflare Worker" referrerpolicy="no-referrer" allow="fullscreen"></iframe>
+    </div>
+    <footer>Only the specified upstream host is configured in the Worker. Some websites block iframe embedding, cross-origin cookies, or proxy traffic. This page does not bypass those protections.</footer>
+  </main>
+  <script>
+    "use strict";
+    const key = "blooket-test-worker-url";
+    const input = document.getElementById("workerUrl");
+    const frame = document.getElementById("frame");
+    const viewer = document.getElementById("viewer");
+    const notice = document.getElementById("notice");
+    const connection = document.getElementById("connection");
+    const reload = document.getElementById("reload");
+    const external = document.getElementById("external");
+    let activeUrl = "";
+
+    function normalize(value) {
+      try {
+        const url = new URL(value.trim());
+        if (url.protocol !== "https:" || !url.hostname || url.username || url.password || url.search || url.hash) return null;
+        url.pathname = "/";
+        return url.toString();
+      } catch { return null; }
+    }
+    function message(text, warning) {
+      notice.textContent = text;
+      notice.classList.toggle("warn", Boolean(warning));
+    }
+    async function launch() {
+      const url = normalize(input.value);
+      if (!url) {
+        message("Enter a full HTTPS Cloudflare Worker URL, without query parameters.", true);
+        return;
+      }
+      activeUrl = url;
+      localStorage.setItem(key, url);
+      frame.src = url;
+      viewer.hidden = false;
+      reload.disabled = false;
+      external.disabled = false;
+      connection.textContent = "Checking Worker";
+      message("Opening the Cloudflare-hosted page. If the frame is blank, use 'Open proxy in new tab'.");
+      try {
+        const reply = await fetch(url + "__proxy_health", { cache: "no-store" });
+        if (!reply.ok) throw new Error("Worker health check failed");
+        const health = await reply.json();
+        if (health.service !== "blooket-test-fixed-proxy") throw new Error("This is not the expected Worker");
+        if (activeUrl !== url) return;
+        connection.textContent = "Worker reachable";
+        message("Cloudflare Worker is reachable. Whether Blooket loads depends on the source site and its embedding permissions.");
+      } catch {
+        if (activeUrl !== url) return;
+        connection.textContent = "Worker not verified";
+        message("The Worker could not be verified. Check the address and deployment; the embedded site may not load.", true);
+      }
+    }
+    document.getElementById("save").addEventListener("click", launch);
+    input.addEventListener("keydown", event => { if (event.key === "Enter") launch(); });
+    reload.addEventListener("click", () => { if (activeUrl) frame.src = activeUrl; });
+    external.addEventListener("click", () => { if (activeUrl) window.open(activeUrl, "_blank", "noopener,noreferrer"); });
+    document.getElementById("reset").addEventListener("click", () => {
+      activeUrl = "";
+      localStorage.removeItem(key);
+      input.value = "";
+      frame.removeAttribute("src");
+      viewer.hidden = true;
+      reload.disabled = true;
+      external.disabled = true;
+      connection.textContent = "Worker not configured";
+      message("Saved address cleared. Enter a Worker URL to launch.");
+    });
+    const saved = normalize(localStorage.getItem(key) || "");
+    if (saved) {
+      input.value = saved;
+      launch();
+    }
+  </script>
+</body>
+</html>
